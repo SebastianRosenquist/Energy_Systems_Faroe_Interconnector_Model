@@ -1,0 +1,182 @@
+using JuMP
+using Clp
+using Plots, StatsPlots
+using DataFrames, CSV
+
+########################################################################################################################
+# DATA DEFINITION 
+
+# We merge the data to have all in the same CSV 
+data_Dk1 = CSV.read("data/timedata_Dk1.csv", DataFrame)
+# data_Dk1 = CSV.read("timedata_Dk1.csv", DataFrame)
+data_Dk2 = CSV.read("data/timedata_Dk2.csv", DataFrame)
+#data_Dk2 = CSV.read("timedata_Dk2.csv", DataFrame)
+data_IslandsFeroe = CSV.read("data/timedata_IslandsFeroe.csv", DataFrame)
+#data_IslandsFeroe = CSV.read("timedata_IslandsFeroe.csv", DataFrame)
+
+# names() function retrieves the names of variables or columns in a given data
+names(data_Dk1)
+names(data_Dk2)
+names(data_IslandsFeroe)
+
+data = innerjoin(data_Dk1, data_Dk2, on=:hour) 
+data = innerjoin(data, data_IslandsFeroe, on=:hour)
+println(data)
+
+# We define the sets and parameters
+T = data[!, :hour]  # This is now correctly referencing the hours
+println("T: ", T)
+
+# Ensure T contains the correct type of indices
+T = parse.(Int, replace.(data[!, :hour], r"t" => ""))
+println("T: ", T)
+
+P = ["p1_Dk1", "p2_Dk1", "pv_Dk1", "wind_Dk1", "p1_Dk2", "p2_Dk2", "pv_Dk2", "wind_Dk2", "p1_IF", "p2_IF", "pv_IF", "wind_IF"]
+DISP = ["p1_Dk1", "p2_Dk1", "p1_Dk2", "p2_Dk2", "p1_IF", "p2_IF"]
+NONDISP = ["pv_Dk1", "wind_Dk1", "pv_Dk2", "wind_Dk2", "pv_IF", "wind_IF"]
+N = ["nDk1", "nDk2", "nIF"]  # these are the nodes in our model
+
+# We need to read the demands from DK1, DK2, and Islands Feroe
+#demand = Dict(
+#    t => Dict(
+#        "demandDK1" => data[data.hour .== t, :demandDk1] / 1000,
+#        "demandDK2" => data[data.hour .== t, :demandDk2] / 1000,
+#        "demandIF" => data[data.hour .== t, :demandIF] / 1000
+#   ) for t in T
+#)
+demand = Dict(
+    "demandDK1" => data[!, :demandDk1],  # Energy demand for zone 1
+    "demandDK2" => data[!, :demandDk2],
+    "demandIF" => data[!, :demandIF]) 
+
+
+println(demand)
+
+# Meters of installed capacity
+pv_installed_DK1 = 2738
+wind_installed_DK1 = 5713
+pv_installed_DK2 = 992
+wind_installed_DK2 = 1793
+pv_installed_IF = 30  # tbd
+wind_installed_IF = 100  # tbd
+
+# We define our generators
+mc = Dict(
+    "p1_Dk1" => 30,
+    "p1_Dk2" => 30,
+    "p1_IF" => 30,
+    "p2_Dk1" => 30,
+    "p2_Dk2" => 30,
+    "p2_IF" => 80
+)
+
+g_max = Dict(
+    "p1_Dk1" => 100,
+    "p1_Dk2" => 400,
+    "p1_IF" => 60,
+    "p2_Dk1" => 700,
+    "p2_Dk2" => 30,
+    "p2_IF" => 200
+)
+
+
+# Diccionario para almacenar las series de tiempo de energía renovable por nodo y tecnología
+#feedin = Dict()
+
+# Llenamos el diccionario con la disponibilidad de PV y Wind para cada nodo y tecnología
+#for t in T
+    # Verificar y agregar las series de tiempo para cada nodo y tecnología
+    #get!(feedin, ("nDk1", "pv"), Dict())[t] = data[data.hour .== t, :pvDk1] * pv_installed_DK1
+   # get!(feedin, ("nDk1", "wind"), Dict())[t] = data[data.hour .== t, :windDk1] * wind_installed_DK1
+    #get!(feedin, ("nDk2", "pv"), Dict())[t] = data[data.hour .== t, :pvDk2] * pv_installed_DK2
+   # get!(feedin, ("nDk2", "wind"), Dict())[t] = data[data.hour .== t, :windDk2] * wind_installed_DK2
+   # get!(feedin, ("nIF", "pv"), Dict())[t] = data[data.hour .== t, :pvIF] * pv_installed_IF
+   # get!(feedin, ("nIF", "wind"), Dict())[t] = data[data.hour .== t, :windIF] * wind_installed_IF
+#end
+
+
+# Función para obtener el valor de feedin, con un valor predeterminado si no existe
+#res_feed_in(n, res) = get(feedin, (n, res), Dict{Int, Float64}())  # Se obtiene el feedin para el nodo y recurso especificado
+
+
+#feedin = Dict(("nDk1", "wind_Dk1") => data[!, :windDk1],
+#("nDk1", "pv_Dk1") => data[!, :pvDk1],
+#("nDk2", "wind_Dk2") => data[!, :windDk2],
+#("nDk2", "pv_Dk2") => data[!, :pvDk2],
+#("nIF", "pv_IF") => data[!, :pvIF],
+#("nIF", "wind_IF") => data[!, :windIF])
+
+# Diccionario para almacenar las series de tiempo de energía renovable por nodo y tecnología
+feedin = Dict(
+    ("nDk1", "wind_Dk1") => data[!, :windDk1] .* wind_installed_DK1,
+    ("nDk1", "pv_Dk1") => data[!, :pvDk1] .* pv_installed_DK1,
+    ("nDk2", "wind_Dk2") => data[!, :windDk2] .* wind_installed_DK2,
+    ("nDk2", "pv_Dk2") => data[!, :pvDk2] .* pv_installed_DK2,
+    ("nIF", "wind_IF") => data[!, :windIF] .* wind_installed_IF,
+    ("nIF", "pv_IF") => data[!, :pvIF] .* pv_installed_IF
+)
+
+
+
+# Función que devuelve la serie de tiempo de generación renovable para un nodo y tecnología específicos
+function res_feed_in(n, res)
+    if haskey(feedin, (n, res))
+        return feedin[(n, res)]
+    else
+        return zeros(length(T))  # Devuelve una serie de ceros si no hay datos para la combinación de nodo y tecnología
+    end
+end
+
+
+# We define the lines of our model
+n2p = Dict(
+    "nDk1" => ["p1_Dk1", "p2_Dk1"],  # Multiple plants in the same node
+    "nDk2" => ["p1_Dk2", "p2_Dk2"],  # Multiple plants in the same node
+    "nIF" => ["p1_IF", "p2_IF"]       # Multiple plants in the same node
+)
+
+# maps the inverse of n2p as a dict: power plant to node
+p2n = Dict(p => k for (k, v) in n2p for p in v)
+
+# net transfer capacity for each line (the grid limits)
+ntc = Dict(
+    ("nDk1", "nDk2") => 50,
+    ("nDk1", "nIF") => 50,
+    ("nDk2", "nIF") => 50,
+    ("nDk2", "nDk1") => 50,  # Inverse direction
+    ("nIF", "nDk1") => 50, 
+    ("nIF", "nDk2") => 50
+)
+
+
+# Check the type of variables
+typeof(T[1])
+
+# Check the type of variables
+typeof(demand["demandDK1"][1])
+
+
+# MODEL CREATION 
+
+m = Model(Clp.Optimizer)
+
+# Defining variables
+@variable(m, G[disp in DISP, t in T] >= 0)  # Generation variables for dispatchable plants
+@variable(m, CU[n in N, t in T] >= 0)  # Unused capacity for each node
+@variable(m, FLOW[n1 in N, n2 in N, t in T] >= 0)  # Flow variables between nodes
+
+# Objective function: Minimizing generation cost
+@objective(m, Min, 
+    sum(mc[disp] * G[disp, t] for disp in DISP, t in T)  # Generation cost minimization
+)
+
+# Constraint for electricity balance at each node
+@constraint(m, ElectricityBalance[n in N, t in T], 
+    sum(G[disp, t] for disp in n2p[n]) +  # Dispatchable generation in the node
+    sum(res_feed_in(n, ndisp)[t] for ndisp in NONDISP) +  # Non-dispatchable generation, correctly accessing feedin
+    sum(FLOW[nn, n, t] .- FLOW[n, nn, t] for nn in N) -  # Flows between nodes
+    CU[n, t] == demand[t][n]  # Demand coverage at each node
+)
+
+# Running the optimization
+optimize!(m)
