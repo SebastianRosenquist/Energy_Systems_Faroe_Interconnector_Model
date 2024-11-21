@@ -15,7 +15,8 @@ IF_DK1_interconnector_capacity = 0  # MW
 IF_UK_interconnector_capacity = 1000  # MW
 
 # Define the season
-season = "summer"  # Change this to "winter", "spring", "summer", or "autumn" as needed
+# Change this to "winter", "spring", "summer", or "autumn" as needed
+season = "summer"  
 
 
 ########################################################################################################################
@@ -76,7 +77,9 @@ mc = Dict(
     "p2_UK" => 65
 )
 
-# We define the upper bounds (installed capacity) for the generators (in MW) for each node and technology (p1 = coal, p2 = oil)
+# We define the upper bounds (installed capacity) for the generators (in MW) 
+# for each node and technology (p1 = coal, p2 = oil)
+# This data is based on the installed capacity data from https://app.electricitymaps.com
 g_max = Dict(
     "p1_Dk1" => 1940,
     "p1_Dk2" => 1080,
