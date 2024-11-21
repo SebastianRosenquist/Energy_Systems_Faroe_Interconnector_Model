@@ -1,0 +1,288 @@
+using JuMP
+using Clp
+using Plots, StatsPlots
+using DataFrames, CSV
+
+########################################################################################################################
+# DATA DEFINITION 
+data = CSV.read("UK_data_spring.csv", DataFrame)
+#data = CSV.read("UK_data_summer.csv", DataFrame)
+#data = CSV.read("UK_data_autumn.csv", DataFrame)
+#data = CSV.read("UK_data_winter.csv", DataFrame)
+names(data)
+println(data)
+
+# We define the sets and parameters
+T = data[!, :hour]  # This is now correctly referencing the hours
+P = ["p1_Dk1", "p2_Dk1", "pv_Dk1", "wind_Dk1", "p1_Dk2", "p2_Dk2", "pv_Dk2", "wind_Dk2", "p1_IF", "p2_IF", "pv_IF", "wind_IF", "p1_UK", "p2_UK", "pv_UK", "wind_UK"]
+DISP = ["p1_Dk1", "p2_Dk1", "p1_Dk2", "p2_Dk2", "p1_IF", "p2_IF", "p1_UK", "p2_UK"]
+NONDISP = ["pv_Dk1", "wind_Dk1", "pv_Dk2", "wind_Dk2", "pv_IF", "wind_IF", "pv_UK", "wind_UK"]
+N = ["nDk1", "nDk2", "nIF", "nUK"]  # these are the nodes in our model
+
+demand = Dict(
+    "nDk1" => data[!, :demandDk1],  # Energy demand for zone 1
+    "nDk2" => data[!, :demandDk2],
+    "nIF" => data[!, :demandIF], 
+    "nUK" => data[!, :demandUK]) 
+println(demand)
+
+# Meters of installed capacity
+pv_installed_DK1 = 1 #2738
+wind_installed_DK1 = 1 #5713
+pv_installed_DK2 = 1 #992
+wind_installed_DK2 = 1# 1793
+pv_installed_IF = 1  # tbd
+wind_installed_IF = 1  # tbd
+pv_installed_UK = 1  # tbd
+wind_installed_UK = 1  # tbd
+
+# We define our generators
+mc = Dict(
+    "p1_Dk1" => 50,
+    "p1_Dk2" => 43,
+    "p1_IF" => 53,
+    "p1_UK" => 47,
+    "p2_Dk1" => 73,
+    "p2_Dk2" => 77,
+    "p2_IF" => 82, 
+    "p2_UK" => 30
+)
+
+g_max = Dict(
+    "p1_Dk1" => 100,
+    "p1_Dk2" => 400,
+    "p1_IF" => 60,
+    "p1_UK" => 60,
+    "p2_Dk1" => 700,
+    "p2_Dk2" => 30,
+    "p2_IF" => 200,
+    "p2_UK" => 200
+)
+
+feedin = Dict(
+    ("nDk1", "wind_Dk1") => data[!, :windDk1] .* wind_installed_DK1,
+    ("nDk1", "pv_Dk1") => data[!, :pvDk1] .* pv_installed_DK1,
+    ("nDk2", "wind_Dk2") => data[!, :windDk2] .* wind_installed_DK2,
+    ("nDk2", "pv_Dk2") => data[!, :pvDk2] .* pv_installed_DK2,
+    ("nIF", "wind_IF") => data[!, :windIF] .* wind_installed_IF,
+    ("nIF", "pv_IF") => data[!, :pvIF] .* pv_installed_IF,
+    ("nUK", "wind_UK") => data[!, :windUK] .* wind_installed_UK,
+    ("nUK", "pv_UK") => data[!, :pvUK] .* pv_installed_UK
+)
+
+
+function res_feed_in(n, res)
+    if haskey(feedin, (n, res))
+        return feedin[(n, res)]
+    else
+        return zeros(length(T)) 
+    end
+end
+
+# We define the grid of our model
+n2p = Dict(
+    "nDk1" => ["p1_Dk1", "p2_Dk1"],  # Multiple plants in the same node
+    "nDk2" => ["p1_Dk2", "p2_Dk2"],  # Multiple plants in the same node
+    "nIF" => ["p1_IF", "p2_IF"],  # Multiple plants in the same node
+    "nUK" => ["p1_UK", "p2_UK"]   # Multiple plants in the same node
+)
+
+# Maps the inverse of n2p as a dict: power plant to node
+p2n = Dict(p => k for (k, v) in n2p for p in v)
+
+# Net transfer capacity for each line (the grid limits)
+ntc = Dict(
+    ("nDk1", "nDk2") => 0,
+    ("nDk1", "nIF") => 0,
+    ("nDk2", "nIF") => 0,
+    ("nDk2", "nDk1") => 0,  # Inverse direction
+    ("nIF", "nDk1") => 0, 
+    ("nIF", "nDk2") => 0,
+    ("nDk2", "nUK") => 0,  # Inverse direction
+    ("nDk1", "nUK") => 0, 
+    ("nIF", "nUK") => 0,
+    ("nUK", "nDk1") => 0,  # Inverse direction
+    ("nUK", "nDk2") => 0, 
+    ("nUK", "nIF") => 0
+
+)
+
+#######################################################################################################################
+# MODEL CREATION 
+
+m = Model(Clp.Optimizer)
+
+# Defining variables
+@variable(m, G[disp in DISP, t in T] >= 0)  # Generation variables for dispatchable plants
+@variable(m, CU[n in N, t in T] >= 0)  # Unused capacity for each node
+@variable(m, FLOW[n1 in N, n2 in N, t in T] >= 0)  # Flow variables between nodes
+
+# Objective function: Minimizing generation cost
+@objective(m, Min, 
+    sum(mc[disp] * G[disp, t] for disp in DISP, t in T)  # Generation cost minimization
+)
+
+# Constraint for electricity balance at each node
+@constraint(m, ElectricityBalance[n in N, t in T], 
+    sum(G[disp, t] for disp in n2p[n]) +  # Dispatchable generation in the node
+    sum(res_feed_in(n, ndisp)[t] for ndisp in NONDISP) +  # Non-dispatchable generation, correctly accessing feedin
+    sum(FLOW[nn, n, t] .- FLOW[n, nn, t] for nn in N) -  # Flows between nodes
+    CU[n, t] == demand[n][t]  # Demand coverage at each node
+)
+
+# Constraint for flow capacity limits
+@constraint(m, FlowCapacity[(n1, n2) in keys(ntc), t in T], 
+    FLOW[n1, n2, t] <= ntc[(n1, n2)]
+)
+
+# Constraint for inverse flow capacity limits
+@constraint(m, FlowCapacityInverse[(n1, n2) in keys(ntc), t in T], 
+    FLOW[n2, n1, t] <= ntc[(n1, n2)]
+)
+
+# Running the optimization
+optimize!(m)
+
+#########################################################################################################################
+#RESULTS 
+#This are the results of how much energy the generators are providing
+result_G = value.(G)
+g = DataFrame(
+        (variable="dispatchable", node=p2n[p], t=t, value=result_G[p,t])
+    for p in DISP, t in T)
+
+result_FLOW = value.(FLOW)
+exchange = DataFrame(
+        (variable="exchange",
+        node=n,
+        t=t,
+        value = sum(result_FLOW[nn,n,t] - result_FLOW[n,nn,t] for nn in N))
+    for n in N, t in T)
+
+result_CU = value.(CU)
+curtailment = DataFrame(
+        (variable="curtailment",
+        node=n,
+        t=t,
+        value = result_CU[n,t])
+    for n in N, t in T)
+
+
+nondispatchable = DataFrame(
+        (variable="nondisp",
+        node=n,
+        t=t,
+        value = sum(res_feed_in(n,ndisp)[t] for ndisp=NONDISP))
+    for n in N, t in T)
+
+energybalance = vcat(curtailment, exchange, g, nondispatchable)
+
+price = dual.(ElectricityBalance)
+
+###############################################################################
+### Plotting ###
+
+colors = [:brown :red :purple :green]
+
+df_nDk1 = filter(x-> x.node == "nDk1", energybalance)
+df_nDk2 = filter(x-> x.node == "nDk2", energybalance)
+df_nIF = filter(x-> x.node == "nIF", energybalance)
+df_nUK = filter(x-> x.node == "nUK", energybalance)
+
+x1 = df_nDk1[:,:t]
+y1 = df_nDk1[:,:value]
+g1 = df_nDk1[:,:variable]
+
+n1 = groupedbar(x1,y1, group=g1,
+    color=colors,
+    bar_position=:stack,
+    legend=:bottomleft,
+    yaxis="MW",
+    title="n1",
+    grid=false)
+
+price1 = price["nDk1",:].data
+n1_twin = twinx(n1)
+scatter!(n1_twin, price1,
+    color=:black,
+    legend=false,
+    ylim=(-10,50),
+    grid=false)
+
+x2 = df_nDk2[:,:t]
+y2 = df_nDk2[:,:value]
+g2 = df_nDk2[:,:variable]
+
+n2 = groupedbar(x2,y2, group=g2,
+    color=colors,
+    bar_position=:stack,
+    legend=false,
+    title="n2",
+    grid=false)
+
+price2 = price["nDk2",:].data
+n2_twin = twinx(n2)
+scatter!(n2_twin, price2,
+    color=:black,
+    legend=false,
+    ylim=(-10,50),
+    grid=false,
+    yaxis="Price")
+
+
+x3 = df_nIF[:,:t]
+y3 = df_nIF[:,:value]
+g3 = df_nIF[:,:variable]
+
+n3 = groupedbar(x3,y3, group=g3,
+    color=colors,
+    bar_position=:stack,
+    legend=:bottomleft,
+    yaxis="MW",
+    title="n3",
+    grid=false)
+
+price3 = price["nIF",:].data
+n3_twin = twinx(n3)
+scatter!(n3_twin, price3,
+    color=:black,
+    legend=false,
+    ylim=(-10,50),
+    grid=false)
+
+
+x4 = df_nUK[:,:t]
+y4 = df_nUK[:,:value]
+g4 = df_nUK[:,:variable]
+
+n4 = groupedbar(x4,y4, group=g4,
+    color=colors,
+    bar_position=:stack,
+    legend=:bottomleft,
+    yaxis="MW",
+    title="n4",
+    grid=false)
+
+price4 = price["nUK",:].data
+n4_twin = twinx(n4)
+scatter!(n4_twin, price4,
+    color=:black,
+    legend=false,
+    ylim=(-10,50),
+    grid=false)
+
+
+
+
+plot(n1, n2, n3, n4, grid=(4,1))
+savefig("result_ALL-transport.pdf")
+plot(n1, grid=(1,1))
+savefig("result_Dk1transport.pdf")
+plot(n2, grid=(1,1))
+savefig("result_Dk2transport.pdf")
+plot(n3, grid=(1,1))
+savefig("result_IFtransport.pdf")
+plot(n4, grid=(1,1))
+savefig("result_UKtransport.pdf")
+
+
