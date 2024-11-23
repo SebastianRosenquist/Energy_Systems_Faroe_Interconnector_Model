@@ -8,15 +8,30 @@ using FilePathsBase
 # TEST PARAMETERS DEFINITION
 
 # Name of what we are testing (this will be used to create the folder to save the results)
-name = "1000 mw interconnector between IF and UK"
+name = "5x wind power on IF and 1000 mw interconnector between IF and DK1"
 
 # Interconnector capacities for testing
-IF_DK1_interconnector_capacity = 0  # MW
-IF_UK_interconnector_capacity = 1000  # MW
+IF_DK1_interconnector_capacity = 1000  # MW
+IF_UK_interconnector_capacity = 0  # MW
 
 # Define the season
 # Change this to "winter", "spring", "summer", or "autumn" as needed
-season = "summer"  
+season = "winter"  
+
+# Factors of installed capacity for each node and technology
+# These are the installed capacities for each technology in each node
+# 2 means 2x the installed capacity
+pv_installed_DK1 = 1 
+wind_installed_DK1 = 1 
+
+pv_installed_DK2 = 1 
+wind_installed_DK2 = 1 
+
+pv_installed_IF = 0  
+wind_installed_IF = 5  
+
+pv_installed_UK = 1  
+wind_installed_UK = 1  
 
 
 ########################################################################################################################
@@ -44,24 +59,13 @@ DISP = ["p1_Dk1", "p2_Dk1", "p1_Dk2", "p2_Dk2", "p1_IF", "p2_IF", "p1_UK", "p2_U
 NONDISP = ["pv_Dk1", "wind_Dk1", "pv_Dk2", "wind_Dk2", "pv_IF", "wind_IF", "pv_UK", "wind_UK"]
 N = ["nDk1", "nDk2", "nIF", "nUK"]  # these are the nodes in our model
 
+# We define the demand for each node (in MWh)
 demand = Dict(
-    "nDk1" => data[!, :demandDk1],  # Energy demand for zone 1
+    "nDk1" => data[!, :demandDk1], 
     "nDk2" => data[!, :demandDk2],
     "nIF" => data[!, :demandIF], 
     "nUK" => data[!, :demandUK]) 
 println(demand)
-
-# Factors of installed capacity for each node and technology
-# These are the installed capacities for each technology in each node
-# 2 means 2x the installed capacity
-pv_installed_DK1 = 2 
-wind_installed_DK1 = 2 
-pv_installed_DK2 = 1 
-wind_installed_DK2 = 1 
-pv_installed_IF = 1  
-wind_installed_IF = 1  
-pv_installed_UK = 2  
-wind_installed_UK = 2  
 
 # We define our generators and their marginal costs (in Euro/MWh)
 mc = Dict(
@@ -70,6 +74,7 @@ mc = Dict(
     "p1_Dk2" => 160,
     "p1_IF" => 200,
     "p1_UK" => 170,
+    
     # Oil power plants
     "p2_Dk1" => 45 , # Oil price
     "p2_Dk2" => 55,
@@ -85,6 +90,7 @@ g_max = Dict(
     "p1_Dk2" => 1080,
     "p1_IF" => 0,
     "p1_UK" => 1490,
+    
     "p2_Dk1" => 195,
     "p2_Dk2" => 764,
     "p2_IF" => 87,
@@ -271,7 +277,7 @@ g2 = df_nDk2[:,:variable]
 n2 = groupedbar(x2,y2, group=g2,
     color=colors,
     bar_position=:stack,
-    legend=false,
+    legend=:bottomleft,
     title="DK2 $season",
     grid=false
 )
@@ -340,7 +346,7 @@ folder_name = "results/$season/$name"
 mkpath(folder_name)
 
 # Save the plots
-plot(n1, n2, n3, n4, grid=(4,1))
+plot(n1, n2, n3, n4, grid=(4,1), legend = false)
 savefig(joinpath(folder_name, "result_ALL-transport_$season.pdf"))
 plot(n1, grid=(1,1))
 savefig(joinpath(folder_name, "result_Dk1_transport_$season.pdf"))
