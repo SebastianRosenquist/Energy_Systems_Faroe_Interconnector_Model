@@ -8,30 +8,30 @@ using FilePathsBase
 # TEST PARAMETERS DEFINITION
 
 # Name of what we are testing (this will be used to create the folder to save the results)
-name = "5x wind power on IF and 1000 mw interconnector between IF and DK1"
+name = "5x wind power on IF, 2x solar and wind DK1 and DK2, 3x Solar and 2x wind UK with 500 mw interconnector between IF and UK"
 
 # Interconnector capacities for testing
-IF_DK1_interconnector_capacity = 1000  # MW
-IF_UK_interconnector_capacity = 0  # MW
+IF_DK1_interconnector_capacity = 0  # MW
+IF_UK_interconnector_capacity = 500  # MW
 
 # Define the season
 # Change this to "winter", "spring", "summer", or "autumn" as needed
-season = "winter"  
+season = "autumn"  
 
 # Factors of installed capacity for each node and technology
 # These are the installed capacities for each technology in each node
 # 2 means 2x the installed capacity
-pv_installed_DK1 = 1 
-wind_installed_DK1 = 1 
+pv_installed_DK1 = 2
+wind_installed_DK1 = 2 
 
-pv_installed_DK2 = 1 
-wind_installed_DK2 = 1 
+pv_installed_DK2 = 2 
+wind_installed_DK2 = 2 
 
-pv_installed_IF = 0  
+pv_installed_IF = 1  
 wind_installed_IF = 5  
 
-pv_installed_UK = 1  
-wind_installed_UK = 1  
+pv_installed_UK = 3  
+wind_installed_UK = 2  
 
 
 ########################################################################################################################
